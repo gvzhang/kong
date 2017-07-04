@@ -4,6 +4,9 @@ local cjson = require "cjson"
 
 local HgTcpLogHandler = BasePlugin:extend()
 
+-- we need to log log_data from response before transform
+HgTcpLogHandler.PRIORITY = 810
+
 local function log(premature, conf, message)
   if premature then
     return
