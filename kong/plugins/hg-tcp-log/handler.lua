@@ -56,7 +56,9 @@ function HgTcpLogHandler:log(conf)
 
   local message = basic_serializer.serialize(ngx)
   message.request.postdata = ngx.req.get_post_args()
-  message.response.body = ngx.ctx.res_body
+  message.response.body = cjson.decode(ngx.ctx.res_body)
+  -- 解决中文问题
+  message.response.body = cjson.encode(message.response.body)
   local ok, err = ngx.timer.at(0, log, conf, message)
   if not ok then
     ngx.log(ngx.ERR, "[hg-tcp-log] failed to create timer: ", err)
