@@ -1,6 +1,7 @@
 local BasePlugin = require "kong.plugins.base_plugin"
 local basic_serializer = require "kong.plugins.log-serializers.basic"
 local cjson = require "cjson"
+cjson.encode_empty_table_as_object(false)
 
 local HgTcpLogHandler = BasePlugin:extend()
 
