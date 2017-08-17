@@ -3,12 +3,14 @@ local basic_serializer = require "kong.plugins.log-serializers.basic"
 local cjson = require "cjson"
 local pcall = pcall
 local ngx_req_get_post_args = ngx.req.get_post_args
+local json_decode = cjson.decode
+local json_encode = cjson.encode
 cjson.encode_empty_table_as_object(false)
 
-local HgTcpLogHandler = BasePlugin:extend()
+local JsonTcpLogHandler = BasePlugin:extend()
 
 -- we need to log log_data from response before transform
-HgTcpLogHandler.PRIORITY = 810
+JsonTcpLogHandler.PRIORITY = 810
 
 local function log(premature, conf, message)
     if premature then
@@ -26,37 +28,38 @@ local function log(premature, conf, message)
 
     ok, err = sock:connect(host, port)
     if not ok then
-        ngx.log(ngx.ERR, "[hg-tcp-log] failed to connect to " .. host .. ":" .. tostring(port) .. ": ", err)
+        ngx.log(ngx.ERR, "[json-tcp-log] failed to connect to " .. host .. ":" .. tostring(port) .. ": ", err)
         return
     end
 
     ok, err = sock:send(cjson.encode(message) .. "\r\n")
     if not ok then
-        ngx.log(ngx.ERR, "[hg-tcp-log] failed to send data to " .. host .. ":" .. tostring(port) .. ": ", err)
+        ngx.log(ngx.ERR, "[json-tcp-log] failed to send data to " .. host .. ":" .. tostring(port) .. ": ", err)
     end
 
     ok, err = sock:setkeepalive(keepalive)
     if not ok then
-        ngx.log(ngx.ERR, "[hg-tcp-log] failed to keepalive to " .. host .. ":" .. tostring(port) .. ": ", err)
+        ngx.log(ngx.ERR, "[json-tcp-log] failed to keepalive to " .. host .. ":" .. tostring(port) .. ": ", err)
         return
     end
 end
 
-function HgTcpLogHandler:new()
-    HgTcpLogHandler.super.new(self, "hg-tcp-log")
+function JsonTcpLogHandler:new()
+    JsonTcpLogHandler.super.new(self, "json-tcp-log")
 end
 
-function HgTcpLogHandler:body_filter(conf)
-    HgTcpLogHandler.super.body_filter(self)
+-- save the share variable ngx.ctx.resp_body before transform
+function JsonTcpLogHandler:body_filter(conf)
+    JsonTcpLogHandler.super.body_filter(self)
 
     local chunk = ngx.arg[1]
     -- minimize the number of calls to ngx.ctx while fallbacking on default value
-    local res_body = ngx.ctx.res_body or ""
-    ngx.ctx.res_body = res_body .. chunk
+    local resp_body = ngx.ctx.resp_body or ""
+    ngx.ctx.resp_body = resp_body .. chunk
 end
 
-function HgTcpLogHandler:log(conf)
-    HgTcpLogHandler.super.log(self)
+function JsonTcpLogHandler:log(conf)
+    JsonTcpLogHandler.super.log(self)
 
     local message = basic_serializer.serialize(ngx)
     -- The pcall function calls its first argument in protected mode,
@@ -67,15 +70,21 @@ function HgTcpLogHandler:log(conf)
     if ok then
         message.request.postdata = res
     end
-    if ngx.ctx.res_body then
-        message.response.body = cjson.decode(ngx.ctx.res_body)
-        -- solve the chinese problem
-        message.response.body = cjson.encode(message.response.body)
+
+    -- log JSON date
+    local content_type = message.response.headers["Content-Type"];
+    if content_type ~= nil and string.lower(content_type) == "application/json" and ngx.ctx.resp_body ~= nil then
+        -- solve the chinese problem, because the data is serialized
+        local ok, ret = pcall(json_decode, ngx.ctx.resp_body)
+        if ok then
+           message.response.body = json_encode(ret)
+        end
     end
+    
     local ok, err = ngx.timer.at(0, log, conf, message)
     if not ok then
-        ngx.log(ngx.ERR, "[hg-tcp-log] failed to create timer: ", err)
+        ngx.log(ngx.ERR, "[json-tcp-log] failed to create timer: ", err)
     end
 end
 
-return HgTcpLogHandler
+return JsonTcpLogHandler
